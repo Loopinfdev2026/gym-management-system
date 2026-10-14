@@ -1,0 +1,254 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum RolUsuario {
+  ADMIN
+  OPERADOR
+}
+
+enum EstadoSocio {
+  ACTIVO
+  INACTIVO
+  VENCIDO
+  SUSPENDIDO
+}
+
+enum EstadoMembresia {
+  ACTIVA
+  VENCIDA
+  CANCELADA
+}
+
+enum MetodoPago {
+  PAGO_MOVIL
+  TARJETA
+  EFECTIVO
+  TRANSFERENCIA
+}
+
+enum DedoHuella {
+  PULGAR_DERECHO
+  INDICE_DERECHO
+  MEDIO_DERECHO
+  ANULAR_DERECHO
+  MENIQUE_DERECHO
+  PULGAR_IZQUIERDO
+  INDICE_IZQUIERDO
+  MEDIO_IZQUIERDO
+  ANULAR_IZQUIERDO
+  MENIQUE_IZQUIERDO
+}
+
+enum TipoEventoAcceso {
+  ENTRADA
+  SALIDA
+}
+
+enum ResultadoAcceso {
+  PERMITIDO
+  DENEGADO
+}
+
+enum MotivoDenegacion {
+  MEMBRESIA_VENCIDA
+  SOCIO_INACTIVO
+  HUELLA_NO_RECONOCIDA
+  SOCIO_SUSPENDIDO
+}
+
+// ==========================================
+// MODELOS
+// ==========================================
+
+model Usuario {
+  id             String     @id @default(uuid()) @db.Uuid
+  nombre         String     @db.VarChar(100)
+  email          String     @unique @db.VarChar(150)
+  passwordHash   String     @map("password_hash") @db.VarChar(255)
+  rol            RolUsuario @default(OPERADOR)
+  activo         Boolean    @default(true)
+  ultimoAcceso   DateTime?  @map("ultimo_acceso")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  sociosCreados      Socio[]        @relation("SociosCreados")
+  pagosRegistrados   Pago[]         @relation("PagosRegistrados")
+  huellasRegistradas Huella[]       @relation("HuellasRegistradas")
+  logsAuditoria      LogAuditoria[]
+
+  @@index([email])
+  @@index([rol])
+  @@map("usuarios")
+}
+
+model Socio {
+  id               String      @id @default(uuid()) @db.Uuid
+  cedula           String      @unique @db.VarChar(20)
+  nombre           String      @db.VarChar(100)
+  apellido         String      @db.VarChar(100)
+  telefono         String?     @db.VarChar(20)
+  email            String?     @db.VarChar(150)
+  fechaNacimiento  DateTime?   @map("fecha_nacimiento") @db.Date
+  direccion        String?
+  fotoUrl          String?     @map("foto_url") @db.VarChar(500)
+  estado           EstadoSocio @default(INACTIVO)
+  fechaVencimiento DateTime?   @map("fecha_vencimiento") @db.Date
+  notas            String?
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  createdBy        String?     @map("created_by") @db.Uuid
+
+  creador          Usuario?          @relation("SociosCreados", fields: [createdBy], references: [id])
+  membresias       Membresia[]
+  pagos            Pago[]
+  huellas          Huella[]
+  historialAccesos HistorialAcceso[]
+
+  @@index([cedula])
+  @@index([estado])
+  @@index([fechaVencimiento])
+  @@index([nombre, apellido])
+  @@map("socios")
+}
+
+model Plan {
+  id           String   @id @default(uuid()) @db.Uuid
+  nombre       String   @db.VarChar(100)
+  descripcion  String?
+  duracionDias Int      @map("duracion_dias")
+  precio       Decimal  @db.Decimal(10, 2)
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  membresias Membresia[]
+
+  @@index([activo])
+  @@map("planes")
+}
+
+model Membresia {
+  id               String          @id @default(uuid()) @db.Uuid
+  socioId          String          @map("socio_id") @db.Uuid
+  planId           String          @map("plan_id") @db.Uuid
+  fechaInicio      DateTime        @map("fecha_inicio") @db.Date
+  fechaVencimiento DateTime        @map("fecha_vencimiento") @db.Date
+  estado           EstadoMembresia @default(ACTIVA)
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  socio Socio @relation(fields: [socioId], references: [id], onDelete: Cascade)
+  plan  Plan  @relation(fields: [planId], references: [id])
+  pago  Pago?
+
+  @@index([socioId])
+  @@index([estado])
+  @@index([fechaVencimiento])
+  @@index([socioId, estado])
+  @@map("membresias")
+}
+
+model Pago {
+  id                       String     @id @default(uuid()) @db.Uuid
+  socioId                  String     @map("socio_id") @db.Uuid
+  membresiaId              String?    @unique @map("membresia_id") @db.Uuid
+  monto                    Decimal    @db.Decimal(10, 2)
+  metodoPago               MetodoPago @map("metodo_pago")
+  referencia               String?    @db.VarChar(100)
+  fechaPago                DateTime   @default(now()) @map("fecha_pago")
+  diasAgregados            Int        @default(30) @map("dias_agregados")
+  fechaVencimientoAnterior DateTime?  @map("fecha_vencimiento_anterior") @db.Date
+  fechaVencimientoNueva    DateTime   @map("fecha_vencimiento_nueva") @db.Date
+  operadorId               String     @map("operador_id") @db.Uuid
+  notas                    String?
+  createdAt                DateTime   @default(now()) @map("created_at")
+
+  socio     Socio      @relation(fields: [socioId], references: [id], onDelete: Cascade)
+  membresia Membresia? @relation(fields: [membresiaId], references: [id])
+  operador  Usuario    @relation("PagosRegistrados", fields: [operadorId], references: [id])
+
+  @@index([socioId])
+  @@index([fechaPago])
+  @@index([metodoPago])
+  @@index([operadorId])
+  @@index([fechaPago, metodoPago])
+  @@map("pagos")
+}
+
+model Huella {
+  id            String     @id @default(uuid()) @db.Uuid
+  socioId       String     @map("socio_id") @db.Uuid
+  dedo          DedoHuella
+  plantillaHash String     @map("plantilla_hash")
+  calidad       Int?
+  activo        Boolean    @default(true)
+  fechaRegistro DateTime   @default(now()) @map("fecha_registro")
+  registradoPor String?    @map("registrado_por") @db.Uuid
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  socio       Socio             @relation(fields: [socioId], references: [id], onDelete: Cascade)
+  registrador Usuario?          @relation("HuellasRegistradas", fields: [registradoPor], references: [id])
+  accesos     HistorialAcceso[]
+
+  @@index([socioId])
+  @@index([activo])
+  @@index([socioId, activo])
+  @@index([dedo])
+  @@map("huellas")
+}
+
+model HistorialAcceso {
+  id               String            @id @default(uuid()) @db.Uuid
+  socioId          String?           @map("socio_id") @db.Uuid
+  huellaId         String?           @map("huella_id") @db.Uuid
+  tipoEvento       TipoEventoAcceso  @map("tipo_evento")
+  resultado        ResultadoAcceso
+  motivoDenegacion MotivoDenegacion? @map("motivo_denegacion")
+  fechaHora        DateTime          @default(now()) @map("fecha_hora")
+  dispositivoId    String?           @map("dispositivo_id") @db.VarChar(50)
+  observaciones    String?
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  socio  Socio?  @relation(fields: [socioId], references: [id])
+  huella Huella? @relation(fields: [huellaId], references: [id])
+
+  @@index([socioId])
+  @@index([fechaHora])
+  @@index([resultado])
+  @@index([socioId, fechaHora])
+  @@index([tipoEvento])
+  @@map("historial_accesos")
+}
+
+model LogAuditoria {
+  id              String   @id @default(uuid()) @db.Uuid
+  usuarioId       String?  @map("usuario_id") @db.Uuid
+  accion          String   @db.VarChar(100)
+  entidad         String   @db.VarChar(50)
+  entidadId       String?  @map("entidad_id") @db.Uuid
+  datosAnteriores Json?    @map("datos_anteriores")
+  datosNuevos     Json?    @map("datos_nuevos")
+  ipAddress       String?  @map("ip_address") @db.VarChar(45)
+  userAgent       String?  @map("user_agent")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
+  @@index([entidad])
+  @@index([createdAt])
+  @@index([accion])
+  @@map("logs_auditoria")
+}
